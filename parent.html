@@ -269,8 +269,9 @@ const CONFIG = {
   allowance: {
     min: 10000,
     max: 25000,
-    tiers: [[90, 25000], [75, 22000], [60, 18000], [40, 14000], [0, 10000]],
-    growthBonus: 3000,
+    tiers: [[95, 25000], [85, 22000], [70, 18000], [50, 14000], [0, 10000]],
+    growthBonus: 2000,
+    growthStep: 15, // 지난주보다 이만큼 이상 올라야 보너스
   },
 };
 
@@ -1070,7 +1071,7 @@ function weeklyScore(state, wk, openSubjects, now) {
 function allowanceFor(score, lastScore, cfg = CONFIG.allowance) {
   const i = cfg.tiers.findIndex(([min]) => score >= min);
   const base = cfg.tiers[i][1];
-  const bonus = lastScore != null && score - lastScore >= 10 ? cfg.growthBonus : 0;
+  const bonus = lastScore != null && score - lastScore >= (cfg.growthStep ?? 10) ? cfg.growthBonus : 0;
   const amount = Math.max(cfg.min, Math.min(cfg.max, base + bonus));
   return { tier: TIER_NAMES[i], amount, bonus: amount - base };
 }
