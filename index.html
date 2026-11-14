@@ -1458,10 +1458,10 @@ function finishCard(app, qp) {
   const wroteToday = s.habit.journalDays[d];
   const box = wroteToday ? '' : `<label for="home-journal">오늘 한 줄 일지 (어려웠던 것이나 새로 안 것)</label>
       <textarea id="home-journal" rows="2" maxlength="200" placeholder="예: 분수 나눗셈은 뒤집어서 곱한다"></textarea>`;
-  if (sent && !app.view.finishConfirm) {
+  if (sent && qp.allDone && !app.view.finishConfirm) {
     return `<div class="card finish-card" data-test="finish-done" role="status">
       <p class="promo-title">✓ 오늘 학습을 마쳤어. 수고했어!</p>
-      <p class="sub">${qp.allDone ? '오늘은 공부한 날로 기록됐어.' : '퀘스트를 다 하면 공부한 날로 기록돼. 더 하고 다시 보내도 돼.'}</p>
+      <p class="sub">오늘은 공부한 날로 기록됐어. 더 하고 싶으면 지도에서 계속 모험해도 돼.</p>
       ${box}<button id="home-resend" class="btn ghost">오늘 기록 다시 보내기</button></div>`;
   }
   if (app.view.finishConfirm) {
@@ -1472,7 +1472,7 @@ function finishCard(app, qp) {
   }
   return `<div class="card finish-card" data-test="finish">
     <h2>오늘 학습 마무리</h2>
-    <p class="sub">${qp.allDone ? '퀘스트를 다 했어! 마무리하면 부모님께 오늘 기록이 가.' : '다 끝나면 눌러 줘. 오늘 기록이 부모님께 가.'}</p>
+    <p class="sub">${sent ? '아까 오늘 기록을 보냈어. 퀘스트를 다 하면 한 번 더 눌러 줘.' : qp.allDone ? '퀘스트를 다 했어! 마무리하면 부모님께 오늘 기록이 가.' : '다 끝나면 눌러 줘. 오늘 기록이 부모님께 가.'}</p>
     ${box}<button id="home-finish" class="btn primary">오늘 학습 마무리</button></div>`;
 }
 
