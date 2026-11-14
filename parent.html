@@ -197,6 +197,48 @@ textarea { margin-top: 6px; }
 
 /* 부모 화면 */
 .parent .big { font-size: 20px; font-weight: 800; }
+.parent-head h1 { margin: 4px 0 2px; }
+.parent-head .sub { margin: 0 0 12px; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.card-head h2 { margin: 0; }
+.parent h3 { font-size: 16px; margin: 16px 0 8px; }
+.pill { font-size: 14px; font-weight: 700; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+.pill.ok { background: #1F3B2A; color: #9BE3B4; }
+.pill.doing { background: #3A2E12; color: #F3D99A; }
+.pill.wait { background: var(--panel-2); color: var(--text-dim); }
+.bar { display: block; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--gold); }
+.q-rows, .parts, .u-rows, .goals { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 10px; }
+.q-rows li { display: grid; grid-template-columns: 22px 80px 1fr 44px; align-items: center; gap: 8px; font-size: 16px; }
+.q-rows b, .parts b, .u-rows b { text-align: right; font-variant-numeric: tabular-nums; }
+.q-rows li.done .q-mark, .goals li.done span { color: #9BE3B4; font-weight: 800; }
+.money { font-size: 34px; font-weight: 800; color: #F6DE9C; margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
+.week-strip { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.wd { display: grid; justify-items: center; gap: 4px; background: var(--panel-2); padding: 6px 0; border-radius: 6px; }
+.wd-label { font-size: 13px; color: var(--text-dim); }
+.wd-mark { font-size: 18px; font-weight: 800; min-height: 22px; }
+.wd.quest { background: #2B2412; box-shadow: inset 0 0 0 1px var(--gold); }
+.wd.quest .wd-mark { color: var(--gold); }
+.wd.rest .wd-mark { font-size: 14px; color: var(--ice); }
+.wd.none .wd-mark, .wd.active .wd-mark { color: var(--text-dim); }
+.wd.future { opacity: .45; }
+.legend { margin: 6px 0 0; font-size: 13px; }
+.parts li, .u-rows li { display: grid; grid-template-columns: 64px 1fr 52px; align-items: center; gap: 8px; font-size: 15px; }
+.u-rows li { grid-template-columns: minmax(0, 1.4fr) 1fr 40px; }
+.u-name { line-height: 1.35; }
+.u-sub { display: inline-block; font-size: 12px; font-weight: 700; color: var(--night); background: var(--ice); padding: 0 5px; margin-right: 6px; border-radius: 3px; }
+.goals li { font-size: 15px; }
+.more-title { margin: 22px 0 8px; font-size: 16px; color: var(--text-dim); }
+.fold { background: var(--panel); margin-bottom: 8px; }
+.fold summary { list-style: none; cursor: pointer; padding: 14px 16px; min-height: 48px; display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.fold summary::-webkit-details-marker { display: none; }
+.fold summary::after { content: '펼치기'; margin-left: auto; font-size: 13px; font-weight: 400; color: var(--text-dim); }
+.fold[open] summary::after { content: '접기'; }
+.fold summary:focus-visible { outline: 2px solid var(--ice); outline-offset: -2px; }
+.fold .count { font-size: 13px; color: var(--gold); }
+.fold-body { padding: 0 16px 14px; }
+.foot { margin-top: 16px; }
+.parent-actions { display: grid; gap: 8px; }
 .days { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
 .day { border-bottom: 1px dashed var(--line); padding-bottom: 8px; }
 .day-head { display: flex; gap: 10px; align-items: center; }
@@ -1196,11 +1238,11 @@ function settleOne(state, wk, now, openSubjects, cfg) {
 return { TIER_LABEL, weeklyScore, allowanceFor, settleWeek, settleAll };
 })();
 __m["src/parent/summary.js"] = (function () {
-const { subjectCount } = __m["src/engine/dungeon.js"];
+const { subjectCount, sortUnits } = __m["src/engine/dungeon.js"];
 const { migrate } = __m["src/engine/store.js"];
 const { levelOf } = __m["src/engine/levels.js"];
-const { weekKey, dayKey } = __m["src/engine/time.js"];
-const { studyDays, streak } = __m["src/engine/habit.js"];
+const { weekKey, dayKey, addDays } = __m["src/engine/time.js"];
+const { studyDays, streak, questProgress, goalDone, PLAN_GOALS } = __m["src/engine/habit.js"];
 const { weeklyScore, allowanceFor } = __m["src/engine/allowance.js"];
 // 부모 화면에 보여 줄 요약 (시트에서 받은 보고 → 화면용 값)
 
@@ -1234,13 +1276,30 @@ function summarize(report, now, contents) {
   const weeks = (report.weekly || []).map(r => ({ wk: String(clean(r[0])), score: Number(r[1]), tier: String(r[6]), amount: Number(r[7]), bonus: Number(r[8]) || 0 }))
     .sort((a, b) => (a.wk < b.wk ? 1 : -1));
   const resets = (report.events || []).filter(e => e[2] === 'reset').map(e => dayKey(new Date(e[1])));
-  const out = { nickname: null, saveError, days, weeks, resets, stuck: [], week: null, level: null, hero: null, streak: 0 };
+  const out = { nickname: null, saveError, days, weeks, resets, stuck: [], week: null, level: null, hero: null, streak: 0, today: null, weekDays: [], goals: [], units: [] };
   if (!state) return out;
   const wk = weekKey(now);
   const sc = weeklyScore(state, wk, subjectCount(contents), now);
   const last = weeks.find(w => w.wk < wk)?.score ?? null;
+  const today = dayKey(now);
+  const started = state.habit.quests?.day === today;
+  const qp = started ? questProgress(state, contents, now) : null;
+  const WD = ['월', '화', '수', '목', '금', '토', '일'];
+  const weekDays = WD.map((label, i) => {
+    const d = addDays(wk, i);
+    const mark = d > today ? 'future' : state.habit.questDays?.[d] ? 'quest' : state.habit.rest[d] ? 'rest' : state.habit.days[d] ? 'active' : 'none';
+    return { date: d, label, mark };
+  });
+  const goals = (state.habit.plan[wk] || []).map(id => ({ id, label: PLAN_GOALS.find(g => g.id === id)?.label || id, done: goalDone(state, wk, id, now) }));
+  const units = sortUnits(contents).filter(c => c.id).map(c => ({
+    id: c.id, subject: c.subject, region: c.region, title: c.title, track: c.track,
+    cleared: c.monsters.filter(m => state.progress[m.id]?.cleared).length, total: c.monsters.length,
+  }));
   return {
     ...out,
+    today: { started, quests: qp ? qp.quests : [], allDone: !!qp?.allDone, battles: state.habit.battles?.[today] || 0,
+      kills: state.habit.log?.[today]?.kills || [] },
+    weekDays, goals, units,
     nickname: state.profile.nickname,
     level: levelOf(state.hero.xp).level,
     hero: state.hero,
@@ -1346,7 +1405,7 @@ __m["src/parent/app.js"] = (function () {
 const { CONFIG } = __m["src/config.js"];
 const { canSend, fetchReport } = __m["src/engine/reporter.js"];
 const { defaultState } = __m["src/engine/store.js"];
-const { markStudy, writeJournal, markBattle } = __m["src/engine/habit.js"];
+const { markStudy, writeJournal, markBattle, completeQuestDay, setPlan, ensureDailyQuests, countBattle } = __m["src/engine/habit.js"];
 const { addWrong } = __m["src/engine/review.js"];
 const { addStat } = __m["src/engine/stats.js"];
 const { tierLabel, STAT_LABEL } = __m["src/engine/stats.js"];
@@ -1402,6 +1461,11 @@ function demoReport() {
   for (let i = 0; i <= upTo; i++) { s = markStudy(s, t(i), 20); s = markBattle(s, t(i), true, 'math'); s = addStat(s, 'int', 2, t(i)); }
   s = writeJournal(s, t(upTo, 17), '약수 개수 세는 법이 신기했다');
   s = addWrong(s, 'm1-n4-q2', t(-1));
+  for (let i = 0; i < upTo; i++) s = completeQuestDay(s, t(i, 18));
+  s = setPlan(s, mon, ['study5', 'journal5']);
+  s = { ...s, progress: { 'm1-n1': { cleared: true, clearedAt: t(0).toISOString() }, 'm1-n2': { cleared: true, clearedAt: t(1).toISOString() }, 't1-n1': { cleared: true, clearedAt: t(1).toISOString() } } };
+  s = ensureDailyQuests(s, contents, new Date());
+  s = countBattle(countBattle(s, new Date()), new Date());
   s = { ...s, hero: { ...s.hero, xp: 320 }, lastSeen: t(upTo, 17).toISOString() };
   return {
     ok: true, save: JSON.stringify(s), weekly: [[addDays(mon, -7), 64, 32, 15, 7, 10, 'rare', 18000, 0]], events: [],
@@ -1451,6 +1515,53 @@ function login() {
   </section>`;
 }
 
+const MARK = { quest: ['✓', '퀘스트 완료'], active: ['•', '조금만 함'], rest: ['휴', '휴식 캠프'], none: ['–', '안 함'], future: ['', '아직'] };
+const QUEST_NAME = { battle: '전투', journal: '모험 일지', review: '복습', focus: '집중 타이머' };
+const PART = [['steady', '꾸준함', 40], ['goals', '목표', 30], ['mastery', '숙달', 20], ['balance', '균형', 10]];
+const bar = (n, max) => `<span class="bar" aria-hidden="true"><span style="width:${Math.round(Math.min(1, max ? n / max : 0) * 100)}%"></span></span>`;
+const fold = (title, body, test, open = false) => `<details class="fold" data-test="${test}"${open ? ' open' : ''}><summary>${title}</summary><div class="fold-body">${body}</div></details>`;
+
+function todayCard(r) {
+  if (!r.today) return '';
+  if (!r.today.started) {
+    return `<div class="card today-card" data-test="today"><div class="card-head"><h2>오늘</h2><span class="pill wait">아직 시작 안 함</span></div>
+      <p class="sub">아이가 오늘 아직 앱을 열지 않았어요.</p></div>`;
+  }
+  const rows = r.today.quests.map(q => {
+    const amount = q.need ? `${q.have}/${q.need}` : (q.done ? '완료' : '아직');
+    return `<li class="${q.done ? 'done' : ''}"><span class="q-mark" aria-hidden="true">${q.done ? '✓' : '○'}</span><span class="q-name">${QUEST_NAME[q.kind] || q.kind}</span>${q.need ? bar(q.have, q.need) : '<span></span>'}<b>${amount}</b></li>`;
+  }).join('');
+  return `<div class="card today-card" data-test="today"><div class="card-head"><h2>오늘</h2>
+      <span class="pill ${r.today.allDone ? 'ok' : 'doing'}">${r.today.allDone ? '퀘스트 완료' : '진행 중'}</span></div>
+    <ul class="q-rows">${rows}</ul>
+    ${r.today.kills.length ? `<p class="sub">오늘 처치: ${esc(r.today.kills.join(', '))}</p>` : ''}</div>`;
+}
+
+function weekCard(r) {
+  if (!r.week) return '';
+  const strip = r.weekDays.map(d => `<li class="wd ${d.mark}" title="${MARK[d.mark][1]}"><span class="wd-label">${d.label}</span><span class="wd-mark">${MARK[d.mark][0]}</span><span class="visually-hidden">${MARK[d.mark][1]}</span></li>`).join('');
+  const parts = PART.map(([k, label, max]) => `<li><span>${label}</span>${bar(r.week.parts[k], max)}<b>${r.week.parts[k]}/${max}</b></li>`).join('');
+  const goals = r.goals.length ? r.goals.map(g => `<li class="${g.done ? 'done' : ''}"><span aria-hidden="true">${g.done ? '✓' : '○'}</span> ${esc(g.label)}</li>`).join('')
+    : '<li class="sub">아이가 아직 이번 주 목표를 고르지 않았어요 (수요일까지).</li>';
+  return `<div class="card week-card" data-test="week">
+    <div class="card-head"><h2>이번 주 용돈</h2><span class="sub">일요일 밤 9시 정산</span></div>
+    <p class="money" data-test="week-amount">${won(r.week.amount)}</p>
+    <p class="sub">지금까지 ${r.week.score}점 · ${esc(TIER_LABEL[r.week.tier])}${r.week.bonus ? ` · 성장 보너스 ${won(r.week.bonus)} 포함` : ''}</p>
+    <h3>공부한 날 ${r.week.days}/5</h3>
+    <ol class="week-strip" data-test="week-strip">${strip}</ol>
+    <p class="legend sub">✓ 퀘스트 완료 · • 조금만 함 · 휴 휴식 캠프 · – 안 함</p>
+    <ul class="parts">${parts}</ul>
+    <h3>이번 주 목표</h3><ul class="goals">${goals}</ul></div>`;
+}
+
+function unitsCard(r) {
+  if (!r.units.length) return '';
+  const SUB = { math: '수학', korean: '국어', english: '영어', science: '과학', social: '사회' };
+  const rows = r.units.map(u => `<li><span class="u-name"><span class="u-sub">${SUB[u.subject] || ''}</span>${esc(u.title)}</span>${bar(u.cleared, u.total)}<b>${u.cleared}/${u.total}</b></li>`).join('');
+  return `<div class="card units-card" data-test="units"><h2>단원 진도</h2><ul class="u-rows">${rows}</ul>
+    <p class="sub">처치한 몬스터 수예요. 마지막 칸이 보스예요.</p></div>`;
+}
+
 function summaryHtml(r) {
   const days = r.days.map(d => `<li class="day">
       <div class="day-head"><b>${esc(d.date.slice(5).replace('-', '/'))}</b><span>${d.minutes}분</span>${d.partial ? '<span class="tag">마치기 없이 끝남</span>' : ''}</div>
@@ -1460,30 +1571,27 @@ function summaryHtml(r) {
     </li>`).join('') || '<li class="sub">아직 받은 하루 기록이 없어요.</li>';
   const weeks = r.weeks.map(w => `<tr><td>${esc(w.wk.slice(5).replace('-', '/'))} 주</td><td>${w.score}점</td><td>${esc(TIER_LABEL[w.tier] || w.tier)}</td><td>${won(w.amount)}</td></tr>`).join('');
   const stuck = r.stuck.map(x => `<li>${esc(x.prompt)}<span class="sub"> · 복습 ${x.stage + 1}/4단계, 다음 ${esc(x.due.slice(5).replace('-', '/'))}</span></li>`).join('');
+  const seen = r.lastSeen ? `마지막 접속 ${esc(new Date(r.lastSeen).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}` : '';
+  const hero = r.hero ? `<div class="hero-card">${heroImg(r.profile, r.hero, 'hero-img small')}
+      <div class="hero-meta"><p class="tier">Lv.${r.level} ${esc(stageName(r.profile, r.hero))}</p><p class="sub">${esc(tierLabel(r.hero.tier))} 단계 · 연속 ${r.streak}일</p>
+        <p class="sub">${Object.entries(r.hero.stats).filter(([, v]) => v).map(([k, v]) => `${STAT_LABEL[k]} ${v}`).join(', ') || '아직 스탯이 없어요'}</p></div>
+      ${radarSVG(r.hero.stats)}</div>` : '';
   return `<section class="parent" data-test="parent-summary">
     ${view.demo ? '<p class="warn">예시 데이터예요. 실제 아이 기록이 아니에요.</p>' : ''}
-    <h1>${r.nickname ? `${esc(r.nickname)}의 모험` : '아이의 모험'}</h1>
-    <p class="sub">${[view.fetchedAt ? `${view.fetchedAt.toLocaleString('ko-KR')}에 불러옴` : '', r.lastSeen ? `아이가 마지막으로 연 시각 ${esc(new Date(r.lastSeen).toLocaleString('ko-KR'))}` : ''].filter(Boolean).join(' · ')}</p>
-    ${r.saveError ? '<p class="warn">세이브 기록을 읽을 수 없어서 캐릭터는 보이지 않아요.</p>' : ''}
-    ${r.week ? `<div class="card week">
-      <h2>이번 주</h2>
-      <p class="big">공부한 날 ${r.week.days}/5 · 연속 ${r.streak}일</p>
-      <p>지금까지 ${r.week.score}점, 이대로면 ${esc(TIER_LABEL[r.week.tier])} ${won(r.week.amount)} (일요일 밤 9시 정산)</p>
-    </div>
-    <div class="card hero-card">
-      ${heroImg(r.profile, r.hero, 'hero-img small')}
-      <div class="hero-meta"><p class="tier">Lv.${r.level} ${esc(stageName(r.profile, r.hero))}</p><p class="sub">${esc(tierLabel(r.hero.tier))} 단계</p>
-        <p class="sub">${Object.entries(r.hero.stats).filter(([, v]) => v).map(([k, v]) => `${STAT_LABEL[k]} ${v}`).join(', ') || '아직 스탯이 없어요'}</p></div>
-      ${radarSVG(r.hero.stats)}
-    </div>` : ''}
-    <div class="card"><h2>최근 14일</h2><ul class="days">${days}</ul></div>
-    ${stuck ? `<div class="card"><h2>자주 막히는 문제</h2><ul class="stuck-list">${stuck}</ul>
-      <p class="sub">틀린 문제는 1·3·7·14일 뒤에 다시 나와요. 4단계를 모두 맞히면 목록에서 빠져요.</p></div>` : ''}
-    <div class="card"><h2>주간 용돈 기록</h2>${weeks ? `<table class="weeks"><tbody>${weeks}</tbody></table>` : '<p class="sub">아직 정산된 주가 없어요.</p>'}
-      <p class="sub">아팠던 주처럼 예외가 있으면 금액은 부모님이 정하시면 돼요.</p></div>
-    ${r.resets.length ? `<div class="card"><h2>초기화 기록</h2><p>${r.resets.map(esc).join(', ')}에 아이 앱을 초기화했어요. 아이 앱 설정 → 이어하기에서 부모 코드로 되살릴 수 있어요.</p></div>` : ''}
-    <p class="sub">아이 앱의 일지 칸에는 '부모님도 볼 수 있어'라고 안내돼 있어요.</p>
-    ${view.demo ? '<button id="leave" class="btn ghost">처음 화면으로</button>' : '<button id="refresh" class="btn primary">새로고침</button><button id="logout" class="btn ghost">이 폰에서 코드 지우기</button>'}
+    <header class="parent-head"><h1>${r.nickname ? `${esc(r.nickname)}의 모험` : '아이의 모험'}</h1>
+      <p class="sub">${[r.level ? `Lv.${r.level}` : '', seen].filter(Boolean).join(' · ')}</p></header>
+    ${r.saveError ? '<p class="warn">세이브 기록을 읽을 수 없어서 오늘·이번 주 정보는 보이지 않아요.</p>' : ''}
+    ${todayCard(r)}
+    ${weekCard(r)}
+    ${unitsCard(r)}
+    <h2 class="more-title">자세히 보기</h2>
+    ${fold(`최근 14일 기록 <span class="count">${r.days.length}</span>`, `<ul class="days">${days}</ul>`, 'fold-days')}
+    ${fold(`자주 막히는 문제 <span class="count">${r.stuck.length}</span>`, stuck ? `<ul class="stuck-list">${stuck}</ul><p class="sub">틀린 문제는 1·3·7·14일 뒤에 다시 나와요. 4단계를 모두 맞히면 목록에서 빠져요.</p>` : '<p class="sub">지금 복습할 문제가 없어요.</p>', 'fold-stuck')}
+    ${hero ? fold('캐릭터와 스탯', hero, 'fold-hero') : ''}
+    ${fold('지난 용돈 기록', `${weeks ? `<table class="weeks"><tbody>${weeks}</tbody></table>` : '<p class="sub">아직 정산된 주가 없어요.</p>'}<p class="sub">아팠던 주처럼 예외가 있으면 금액은 부모님이 정하시면 돼요.</p>`, 'fold-weeks')}
+    ${r.resets.length ? fold('초기화 기록', `<p>${r.resets.map(esc).join(', ')}에 아이 앱을 초기화했어요. 아이 앱 설정 → 이어하기에서 부모 코드로 되살릴 수 있어요.</p>`, 'fold-resets') : ''}
+    <p class="sub foot">${view.fetchedAt ? `${view.fetchedAt.toLocaleString('ko-KR')}에 불러옴 · ` : ''}아이 앱의 일지 칸에는 '부모님도 볼 수 있어'라고 안내돼 있어요.</p>
+    ${view.demo ? '<button id="leave" class="btn ghost">처음 화면으로</button>' : '<div class="parent-actions"><button id="refresh" class="btn primary">새로고침</button><button id="logout" class="btn ghost">이 폰에서 코드 지우기</button></div>'}
   </section>`;
 }
 
