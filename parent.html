@@ -103,6 +103,7 @@ textarea { margin-top: 6px; }
 .quest { width: 100%; min-height: 52px; text-align: left; display: flex; gap: 10px; align-items: center; background: var(--panel-2); border: 0; padding: 10px 14px; }
 .quest.done { opacity: .6; text-decoration: line-through; }
 .quest.done span[aria-hidden] { color: var(--gold); font-weight: 700; display: inline-block; text-decoration: none; }
+.quest-have { margin-left: auto; color: var(--gold); font-weight: 700; white-space: nowrap; }
 .quest-count { font-size: 15px; color: var(--gold); margin-left: 6px; }
 .quest-done { background: var(--panel); border-left: 3px solid var(--gold); padding: 12px 14px; margin: 0 0 10px; }
 .quest-done .sub { margin: 4px 0 0; }
@@ -465,7 +466,8 @@ function validate(s) {
   if (!isObj(s.habit) || !['days', 'rest', 'focus', 'plan', 'journalDays'].every(k => isObj(s.habit[k]))) fail('habit');
   const qs = s.habit.quests;
   if (qs !== undefined && (!isObj(qs) || !DAY.test(qs.day) || !Array.isArray(qs.list) || qs.list.length > 5
-    || !qs.list.every(q => isObj(q) && ['review', 'battle', 'focus', 'journal'].includes(q.kind) && str(q.label, 80) && (str(String(q.target), 60))))) fail('quests');
+    || !qs.list.every(q => isObj(q) && ['review', 'battle', 'focus', 'journal'].includes(q.kind) && str(q.label, 80) && (str(String(q.target), 60)) && (q.need === undefined || (Number.isInteger(q.need) && q.need > 0 && q.need <= 20))))) fail('quests');
+  if (s.habit.battles !== undefined && !mapOf(s.habit.battles, n => Number.isInteger(n) && n >= 0)) fail('battles');
   if (!mapOf(s.xpLog, num) || !mapOf(s.weeks, isObj) || !Array.isArray(s.outbox) || !num(s.counter)) fail('misc');
   for (const w of Object.values(s.weeks)) {
     if (w.amount != null && !num(w.amount)) fail('weeks');
@@ -1052,7 +1054,7 @@ function todayQuests(state, contents, now) {
   const ordered = sortUnits(contents).sort((a, b) => last(a) - last(b)); // 동점이면 지도 순서
   for (const c of ordered) {
     const m = c.monsters.find(x => monsterState(c, state.progress, x.id, contents) === 'open');
-    if (m) { quests.push({ kind: 'battle', label: `${c.region}: ${m.name}`, target: m.id }); break; }
+    if (m) { quests.push({ kind: 'battle', label: `전투 ${BATTLES_PER_DAY}번 하기 (추천: ${c.region} ${m.name})`, target: m.id, need: BATTLES_PER_DAY }); break; }
   }
   quests.push({ kind: 'focus', label: '집중 타이머 20분', target: 1 });
   if (quests.length < 3) quests.push({ kind: 'journal', label: '모험 일지 한 줄 쓰기', target: 1 });
@@ -1062,28 +1064,40 @@ function todayQuests(state, contents, now) {
 // 오늘의 퀘스트는 하루 첫 화면에서 정해 저장하고, 그날은 바뀌지 않는다
 function questDone(state, q, day, now) {
   if (q.kind === 'review') return dueReviews(state, now).length === 0;
-  if (q.kind === 'battle') return !!state.progress[q.target]?.cleared;
+  if (q.kind === 'battle') return q.need ? (state.habit.battles?.[day] || 0) >= q.need : !!state.progress[q.target]?.cleared;
   if (q.kind === 'focus') return (state.habit.focus[day] || 0) >= 1;
   if (q.kind === 'journal') return !!state.habit.journalDays[day];
   return false;
 }
 
+const BATTLES_PER_DAY = 4;
+
+// 끝까지 싸운 전투만 센다 (도망은 부르는 쪽에서 빼고 부르지 않는다)
+function countBattle(state, now) {
+  if (isNight(now)) return state;
+  const d = dayKey(now);
+  const battles = state.habit.battles || {};
+  return setHabit(state, 'battles', { ...battles, [d]: (battles[d] || 0) + 1 });
+}
+
 function ensureDailyQuests(state, contents, now) {
   const day = dayKey(now);
-  if (state.habit.quests?.day === day) return state;
-  const list = todayQuests(state, contents, now).map(({ kind, label, target }) => ({ kind, label, target }));
+  const saved = state.habit.quests;
+  const oldRule = saved?.list?.some(q => q.kind === 'battle' && !q.need);
+  if (saved?.day === day && !oldRule) return state;
+  const list = todayQuests(state, contents, now).map(({ kind, label, target, need }) => (need ? { kind, label, target, need } : { kind, label, target }));
   return setHabit(state, 'quests', { day, list });
 }
 
 function questProgress(state, contents, now) {
   const day = dayKey(now);
   const saved = state.habit.quests?.day === day ? state.habit.quests.list : todayQuests(state, contents, now);
-  const quests = saved.map(q => ({ ...q, done: questDone(state, q, day, now) }));
+  const quests = saved.map(q => ({ ...q, done: questDone(state, q, day, now), ...(q.need ? { have: Math.min(state.habit.battles?.[day] || 0, q.need) } : {}) }));
   const done = quests.filter(q => q.done).length;
   return { quests, done, total: quests.length, allDone: quests.length > 0 && done === quests.length };
 }
 
-return { PLAN_GOALS, studyDays, markStudy, markBattle, useRestCamp, streak, focusComplete, writeJournal, planOpen, setPlan, goalDone, todayQuests, ensureDailyQuests, questProgress };
+return { PLAN_GOALS, studyDays, markStudy, markBattle, useRestCamp, streak, focusComplete, writeJournal, planOpen, setPlan, goalDone, todayQuests, BATTLES_PER_DAY, countBattle, ensureDailyQuests, questProgress };
 })();
 __m["src/engine/allowance.js"] = (function () {
 const { weekKey, addDays, dayKey } = __m["src/engine/time.js"];

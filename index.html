@@ -103,6 +103,7 @@ textarea { margin-top: 6px; }
 .quest { width: 100%; min-height: 52px; text-align: left; display: flex; gap: 10px; align-items: center; background: var(--panel-2); border: 0; padding: 10px 14px; }
 .quest.done { opacity: .6; text-decoration: line-through; }
 .quest.done span[aria-hidden] { color: var(--gold); font-weight: 700; display: inline-block; text-decoration: none; }
+.quest-have { margin-left: auto; color: var(--gold); font-weight: 700; white-space: nowrap; }
 .quest-count { font-size: 15px; color: var(--gold); margin-left: 6px; }
 .quest-done { background: var(--panel); border-left: 3px solid var(--gold); padding: 12px 14px; margin: 0 0 10px; }
 .quest-done .sub { margin: 4px 0 0; }
@@ -339,7 +340,8 @@ function validate(s) {
   if (!isObj(s.habit) || !['days', 'rest', 'focus', 'plan', 'journalDays'].every(k => isObj(s.habit[k]))) fail('habit');
   const qs = s.habit.quests;
   if (qs !== undefined && (!isObj(qs) || !DAY.test(qs.day) || !Array.isArray(qs.list) || qs.list.length > 5
-    || !qs.list.every(q => isObj(q) && ['review', 'battle', 'focus', 'journal'].includes(q.kind) && str(q.label, 80) && (str(String(q.target), 60))))) fail('quests');
+    || !qs.list.every(q => isObj(q) && ['review', 'battle', 'focus', 'journal'].includes(q.kind) && str(q.label, 80) && (str(String(q.target), 60)) && (q.need === undefined || (Number.isInteger(q.need) && q.need > 0 && q.need <= 20))))) fail('quests');
+  if (s.habit.battles !== undefined && !mapOf(s.habit.battles, n => Number.isInteger(n) && n >= 0)) fail('battles');
   if (!mapOf(s.xpLog, num) || !mapOf(s.weeks, isObj) || !Array.isArray(s.outbox) || !num(s.counter)) fail('misc');
   for (const w of Object.values(s.weeks)) {
     if (w.amount != null && !num(w.amount)) fail('weeks');
@@ -1024,7 +1026,7 @@ function todayQuests(state, contents, now) {
   const ordered = sortUnits(contents).sort((a, b) => last(a) - last(b)); // 동점이면 지도 순서
   for (const c of ordered) {
     const m = c.monsters.find(x => monsterState(c, state.progress, x.id, contents) === 'open');
-    if (m) { quests.push({ kind: 'battle', label: `${c.region}: ${m.name}`, target: m.id }); break; }
+    if (m) { quests.push({ kind: 'battle', label: `전투 ${BATTLES_PER_DAY}번 하기 (추천: ${c.region} ${m.name})`, target: m.id, need: BATTLES_PER_DAY }); break; }
   }
   quests.push({ kind: 'focus', label: '집중 타이머 20분', target: 1 });
   if (quests.length < 3) quests.push({ kind: 'journal', label: '모험 일지 한 줄 쓰기', target: 1 });
@@ -1034,28 +1036,40 @@ function todayQuests(state, contents, now) {
 // 오늘의 퀘스트는 하루 첫 화면에서 정해 저장하고, 그날은 바뀌지 않는다
 function questDone(state, q, day, now) {
   if (q.kind === 'review') return dueReviews(state, now).length === 0;
-  if (q.kind === 'battle') return !!state.progress[q.target]?.cleared;
+  if (q.kind === 'battle') return q.need ? (state.habit.battles?.[day] || 0) >= q.need : !!state.progress[q.target]?.cleared;
   if (q.kind === 'focus') return (state.habit.focus[day] || 0) >= 1;
   if (q.kind === 'journal') return !!state.habit.journalDays[day];
   return false;
 }
 
+const BATTLES_PER_DAY = 4;
+
+// 끝까지 싸운 전투만 센다 (도망은 부르는 쪽에서 빼고 부르지 않는다)
+function countBattle(state, now) {
+  if (isNight(now)) return state;
+  const d = dayKey(now);
+  const battles = state.habit.battles || {};
+  return setHabit(state, 'battles', { ...battles, [d]: (battles[d] || 0) + 1 });
+}
+
 function ensureDailyQuests(state, contents, now) {
   const day = dayKey(now);
-  if (state.habit.quests?.day === day) return state;
-  const list = todayQuests(state, contents, now).map(({ kind, label, target }) => ({ kind, label, target }));
+  const saved = state.habit.quests;
+  const oldRule = saved?.list?.some(q => q.kind === 'battle' && !q.need);
+  if (saved?.day === day && !oldRule) return state;
+  const list = todayQuests(state, contents, now).map(({ kind, label, target, need }) => (need ? { kind, label, target, need } : { kind, label, target }));
   return setHabit(state, 'quests', { day, list });
 }
 
 function questProgress(state, contents, now) {
   const day = dayKey(now);
   const saved = state.habit.quests?.day === day ? state.habit.quests.list : todayQuests(state, contents, now);
-  const quests = saved.map(q => ({ ...q, done: questDone(state, q, day, now) }));
+  const quests = saved.map(q => ({ ...q, done: questDone(state, q, day, now), ...(q.need ? { have: Math.min(state.habit.battles?.[day] || 0, q.need) } : {}) }));
   const done = quests.filter(q => q.done).length;
   return { quests, done, total: quests.length, allDone: quests.length > 0 && done === quests.length };
 }
 
-return { PLAN_GOALS, studyDays, markStudy, markBattle, useRestCamp, streak, focusComplete, writeJournal, planOpen, setPlan, goalDone, todayQuests, ensureDailyQuests, questProgress };
+return { PLAN_GOALS, studyDays, markStudy, markBattle, useRestCamp, streak, focusComplete, writeJournal, planOpen, setPlan, goalDone, todayQuests, BATTLES_PER_DAY, countBattle, ensureDailyQuests, questProgress };
 })();
 __m["src/engine/allowance.js"] = (function () {
 const { weekKey, addDays, dayKey } = __m["src/engine/time.js"];
@@ -1401,14 +1415,18 @@ function home(app) {
       <div class="radar-card">${radarSVG(s.hero.stats)}</div>
       <h2>오늘의 퀘스트 <span class="quest-count" data-test="quest-count">${qp.done}/${qp.total}</span></h2>
       ${qp.allDone ? `<div class="quest-done" data-test="quests-done" role="status"><p class="promo-title">오늘의 퀘스트 완료!</p><p class="sub">내일 새 퀘스트가 열려. 더 하고 싶으면 지도에서 계속 모험해도 돼.</p></div>` : ''}
-      <ul class="quests">${qp.quests.map(q => `<li data-test="quest"${q.done ? ' data-done="true"' : ''}><button class="quest${q.done ? ' done' : ''}" data-kind="${q.kind}" data-target="${esc(q.target)}" ${q.done ? 'disabled' : ''}><span aria-hidden="true">${q.done ? '✓' : ICON[q.kind]}</span>${esc(q.label)}${q.done ? '<span class="visually-hidden"> (완료)</span>' : ''}</button></li>`).join('')}</ul>
+      <ul class="quests">${qp.quests.map(q => `<li data-test="quest"${q.done ? ' data-done="true"' : ''}><button class="quest${q.done ? ' done' : ''}" data-kind="${q.kind}" data-target="${esc(q.target)}" ${q.done ? 'disabled' : ''}><span aria-hidden="true">${q.done ? '✓' : ICON[q.kind]}</span>${esc(q.label)}${q.need ? ` <span class="quest-have" data-test="battle-count">${q.have}/${q.need}</span>` : ''}${q.done ? '<span class="visually-hidden"> (완료)</span>' : ''}</button></li>`).join('')}</ul>
       ${lastJournal ? `<h2>모험 일지</h2><p class="journal-last">${esc(lastJournal.text)}</p>` : ''}
     </section>`,
     bind(root) {
       on(root, '[data-test=promo-card] button', 'click', () => app.openPromo());
       on(root, '.quest', 'click', (e, el) => {
         const k = el.dataset.kind;
-        if (k === 'battle') app.openMonster(el.dataset.target);
+        if (k === 'battle') {
+          // 추천 몬스터를 이미 잡았으면 지도로 보내서 다른 몬스터와 싸우게 한다
+          if (app.state.progress[el.dataset.target]?.cleared) app.go('map');
+          else app.openMonster(el.dataset.target);
+        }
         else if (k === 'review') app.go('review');
         else app.go('today');
       });
@@ -1965,6 +1983,7 @@ const SECTIONS = [
   ['전투하는 법', ['아래 메뉴의 지도에서 열린 몬스터를 골라. 먼저 개념 수업(설명, 풀이 예시, 확인 질문)을 보고 전투를 시작해.', '확인 질문은 틀려도 괜찮아. 점수와 상관없고, 설명을 보여 줘. 전투 중에도 개념 다시 보기를 열 수 있어.', '문제를 맞히면 공격! 틀리면 내 체력(하트)이 하나 줄어.', '절반 넘게 맞히면 이겨. 엘리트는 5문제 중 4개, 보스는 10문제 중 7개를 맞혀야 해.', '져도 잃는 건 없어. 보스는 다음 날 다시 도전할 수 있고, 그때는 무료 힌트가 생겨.']],
   ['힌트와 풀이', ['막히면 힌트 보기를 눌러. 힌트는 3단계로 조금씩 알려 줘.', '같은 문제를 두 번 틀리면 풀이를 보여 주고, 비슷한 문제를 한 번 더 내.', '힌트 없이 이기면 더 좋은 장비가 나와. 그래도 모를 땐 힌트를 쓰는 게 실력이야.']],
   ['도망친 몬스터 (복습)', ['틀린 문제는 몬스터가 도망친 거야. 1일, 3일, 7일, 14일 뒤에 다시 나타나.', '복습 메뉴에서 잡을 수 있어. 네 번 모두 맞히면 완전히 물리치고 스탯이 올라.']],
+  ['오늘의 퀘스트', ['홈 화면에 매일 퀘스트 3개가 떠. 하루 동안 바뀌지 않아.', '전투 퀘스트는 전투 4번이야. 이겨도 져도 끝까지 싸우면 1번이고, 중간에 도망치면 세지 않아. 깬 몬스터와 연습 전투를 해도 돼.', '3개를 다 하면 오늘의 퀘스트 완료! 다음 날 새 퀘스트가 열려.']],
   ['오늘 메뉴', ['집중 타이머: 20분 집중하고 5분 쉬어. 끝나면 끈기가 올라(하루 3번까지).', '모험 일지: 오늘 어려웠던 것이나 새로 안 것을 한 줄 적어. 부모님도 볼 수 있어.', '오늘 마치기: 공부를 끝내면 꼭 눌러 줘. 오늘 기록이 저장돼.', '휴식 캠프: 쉬는 날로 정하면 연속 기록이 안 끊겨. 일주일에 2번까지.']],
   ['겨울방학 지도', ['튜토리얼 섬에서 초6 수학(분수·소수의 나눗셈, 비와 비율)을 복습하고, 수정 산맥에서 중1 수학을 시작해.', '같은 땅의 다음 단원은 앞 단원 보스를 물리치면 열려.', '국어·영어·과학·사회 땅은 맛보기야. 몬스터 2마리와 보스 하나라서 하루 한 마리씩 들르면 좋아. 여러 과목을 하면 주간 상자의 균형 점수도 올라.', '분수는 / 버튼, 음수는 − 버튼, 소수점은 . 버튼으로 넣어. 분수는 기약분수로 써. 영어 낱말은 대문자·소문자 상관없어.']],
   ['레벨, 스탯, 진화', ['경험치(XP)가 쌓이면 레벨이 올라. 하루에 얻을 수 있는 XP는 150까지야.', '스탯은 과목마다 달라. 수학은 지력, 국어는 통찰, 영어는 민첩, 과학은 기술, 사회는 지휘, 꾸준함은 끈기.', '레벨 4, 8, 12가 되고 단원 보스를 하나 이상 물리쳤으면 홈에 승급전이 나타나. 15문제 중 10문제를 맞히면 합격이고, 동료가 다음 모습으로 진화해.', '승급전에 떨어져도 잃는 건 없어. 내일 다시 도전하면 무료 힌트가 늘어나. 홈의 진화 도감에서 다음 모습의 그림자를 볼 수 있어.', '이미 잡은 몬스터와 다시 싸우면 연습이야. 보상은 없지만 실력은 쌓여.']],
@@ -2000,7 +2019,7 @@ const { startBattle, answer, hint, finish, current, startBossAttempt, bossRetryA
 const { promoStatus, promoMonster, applyPromo, PROMO_LIMIT_MIN } = __m["src/engine/promotion.js"];
 const { applyResult, monsterState, subjectCount } = __m["src/engine/dungeon.js"];
 const { addWrong, reviewAnswer, dueReviews } = __m["src/engine/review.js"];
-const { markBattle, markStudy, focusComplete, writeJournal, useRestCamp, setPlan, streak, planOpen, ensureDailyQuests } = __m["src/engine/habit.js"];
+const { markBattle, markStudy, focusComplete, writeJournal, useRestCamp, setPlan, streak, planOpen, ensureDailyQuests, countBattle } = __m["src/engine/habit.js"];
 const { settleAll } = __m["src/engine/allowance.js"];
 const { isCorrect } = __m["src/engine/answer.js"];
 const { enqueue, canSend, flush, fetchLastSave, verifyParent } = __m["src/engine/reporter.js"];
@@ -2178,6 +2197,7 @@ const app = {
     if (!answered) { app.view.battle = null; return app.go('map'); }
     v.b = { ...v.b, hp: 0, done: true };
     v.solution = null;
+    v.fled = true; // 도망친 전투는 오늘의 전투 횟수에 넣지 않는다
     app.endBattle();
   },
   attack(raw) {
@@ -2236,6 +2256,7 @@ const app = {
     if (v.promo) {
       const pr = applyPromo(logDay(s, now, (l) => l), v.promo, out, now);
       s = markStudy(pr.state, now, 0, true);
+      if (!v.fled) s = countBattle(s, now);
       s = enqueue(s, 'event', { kind: 'promotion', passed: out.won, tier: v.promo.tier, score: out.score, total: out.total }, now);
       if (pr.evolved) s = logDay(s, now, (l) => ({ ...l, kills: [...l.kills, `승급전 합격(${v.promo.tier})`] }));
       v.phase = 'result';
@@ -2250,6 +2271,7 @@ const app = {
     s = logDay(s, now, (l) => l);
     const applied = applyResult(s, v.content, v.monster.id, out, v.b, now);
     s = markBattle(applied.state, now, out.won, v.content.subject, !applied.replay);
+    if (!v.fled) s = countBattle(s, now);
     if (out.won && !applied.replay) s = logDay(s, now, (l) => ({ ...l, kills: [...l.kills, v.monster.name] }));
     if (v.monster.kind === 'boss' && !applied.replay) s = enqueue(s, 'event', { kind: out.won ? 'boss_win' : 'boss_lose', monster: v.monster.id, name: v.monster.name, score: out.score, total: out.total }, now);
     v.phase = 'result';
