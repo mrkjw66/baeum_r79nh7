@@ -101,6 +101,11 @@ textarea { margin-top: 6px; }
 
 .quests { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .quest { width: 100%; min-height: 52px; text-align: left; display: flex; gap: 10px; align-items: center; background: var(--panel-2); border: 0; padding: 10px 14px; }
+.quest.done { opacity: .6; text-decoration: line-through; }
+.quest.done span[aria-hidden] { color: var(--gold); font-weight: 700; display: inline-block; text-decoration: none; }
+.quest-count { font-size: 15px; color: var(--gold); margin-left: 6px; }
+.quest-done { background: var(--panel); border-left: 3px solid var(--gold); padding: 12px 14px; margin: 0 0 10px; }
+.quest-done .sub { margin: 4px 0 0; }
 .journal-last { background: var(--panel); border-left: 3px solid var(--gold); padding: 10px 12px; }
 
 /* 지도 */
@@ -246,6 +251,8 @@ textarea { margin-top: 6px; }
 .evolve.preview { flex-direction: column; }
 @keyframes evolve-in { from { transform: scale(.6); opacity: 0; filter: brightness(3) drop-shadow(0 0 30px #fff); } to { transform: scale(1); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .evolve .new img { animation: none; } }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 </style>
 </head>
@@ -456,6 +463,9 @@ function validate(s) {
   if (!Array.isArray(s.wrong) || !s.wrong.every(w => isObj(w) && str(w.qid, 60) && str(w.subject, 20) && Number.isInteger(w.stage) && DAY.test(w.due))) fail('wrong');
   if (!Array.isArray(s.journal) || !s.journal.every(j => isObj(j) && str(j.at, 40) && str(j.text, 500))) fail('journal');
   if (!isObj(s.habit) || !['days', 'rest', 'focus', 'plan', 'journalDays'].every(k => isObj(s.habit[k]))) fail('habit');
+  const qs = s.habit.quests;
+  if (qs !== undefined && (!isObj(qs) || !DAY.test(qs.day) || !Array.isArray(qs.list) || qs.list.length > 5
+    || !qs.list.every(q => isObj(q) && ['review', 'battle', 'focus', 'journal'].includes(q.kind) && str(q.label, 80) && (str(String(q.target), 60))))) fail('quests');
   if (!mapOf(s.xpLog, num) || !mapOf(s.weeks, isObj) || !Array.isArray(s.outbox) || !num(s.counter)) fail('misc');
   for (const w of Object.values(s.weeks)) {
     if (w.amount != null && !num(w.amount)) fail('weeks');
@@ -907,13 +917,26 @@ function applyResult(state, content, monsterId, outcome, battle, now) {
   return { state: s, rewards, journalLine };
 }
 
-return { GEAR_GRADES, unitOpen, subjectCount, monsterState, applyResult };
+// 지도와 퀘스트에서 쓰는 단원 순서: 수학(튜토리얼 → 중1) → 국어 → 영어 → 과학 → 사회
+const SUBJECT_ORDER = ['math', 'korean', 'english', 'science', 'social'];
+const TRACK_ORDER = { tutorial: 0, mid: 1, taste: 2 };
+
+function sortUnits(contents) {
+  const rank = (c) => [SUBJECT_ORDER.indexOf(c.subject), TRACK_ORDER[c.track] ?? 9, c.order ?? 0];
+  return [...contents].sort((a, b) => {
+    const x = rank(a), y = rank(b);
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+  });
+}
+
+
+return { GEAR_GRADES, unitOpen, subjectCount, monsterState, applyResult, sortUnits };
 })();
 __m["src/engine/habit.js"] = (function () {
 const { dayKey, weekKey, isNight, addDays } = __m["src/engine/time.js"];
 const { addStat, STAT_GAIN } = __m["src/engine/stats.js"];
 const { dueReviews } = __m["src/engine/review.js"];
-const { monsterState } = __m["src/engine/dungeon.js"];
+const { monsterState, sortUnits } = __m["src/engine/dungeon.js"];
 
 
 
@@ -1026,7 +1049,7 @@ function todayQuests(state, contents, now) {
   if (due.length) quests.push({ kind: 'review', label: `도망친 몬스터 ${due.length}마리 잡기`, target: due.length });
   // 가장 오래 안 간 지역부터 (마지막 처치 시각이 오래된 순)
   const last = (c) => Math.max(0, ...c.monsters.map(m => Date.parse(state.progress[m.id]?.clearedAt || 0) || 0));
-  const ordered = [...contents].sort((a, b) => last(a) - last(b));
+  const ordered = sortUnits(contents).sort((a, b) => last(a) - last(b)); // 동점이면 지도 순서
   for (const c of ordered) {
     const m = c.monsters.find(x => monsterState(c, state.progress, x.id, contents) === 'open');
     if (m) { quests.push({ kind: 'battle', label: `${c.region}: ${m.name}`, target: m.id }); break; }
@@ -1036,7 +1059,31 @@ function todayQuests(state, contents, now) {
   return quests.slice(0, 3);
 }
 
-return { PLAN_GOALS, studyDays, markStudy, markBattle, useRestCamp, streak, focusComplete, writeJournal, planOpen, setPlan, goalDone, todayQuests };
+// 오늘의 퀘스트는 하루 첫 화면에서 정해 저장하고, 그날은 바뀌지 않는다
+function questDone(state, q, day, now) {
+  if (q.kind === 'review') return dueReviews(state, now).length === 0;
+  if (q.kind === 'battle') return !!state.progress[q.target]?.cleared;
+  if (q.kind === 'focus') return (state.habit.focus[day] || 0) >= 1;
+  if (q.kind === 'journal') return !!state.habit.journalDays[day];
+  return false;
+}
+
+function ensureDailyQuests(state, contents, now) {
+  const day = dayKey(now);
+  if (state.habit.quests?.day === day) return state;
+  const list = todayQuests(state, contents, now).map(({ kind, label, target }) => ({ kind, label, target }));
+  return setHabit(state, 'quests', { day, list });
+}
+
+function questProgress(state, contents, now) {
+  const day = dayKey(now);
+  const saved = state.habit.quests?.day === day ? state.habit.quests.list : todayQuests(state, contents, now);
+  const quests = saved.map(q => ({ ...q, done: questDone(state, q, day, now) }));
+  const done = quests.filter(q => q.done).length;
+  return { quests, done, total: quests.length, allDone: quests.length > 0 && done === quests.length };
+}
+
+return { PLAN_GOALS, studyDays, markStudy, markBattle, useRestCamp, streak, focusComplete, writeJournal, planOpen, setPlan, goalDone, todayQuests, ensureDailyQuests, questProgress };
 })();
 __m["src/engine/allowance.js"] = (function () {
 const { weekKey, addDays, dayKey } = __m["src/engine/time.js"];
