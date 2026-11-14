@@ -2200,11 +2200,23 @@ const app = {
   now: () => new Date(),
 
   set(next) {
+    const now = app.now();
+    const d = dayKey(now);
+    const prev = app.state;
     // 오늘의 퀘스트를 다 끝냈으면 그날을 공부한 날로 기록한다 (시계가 거꾸로면 기록하지 않음)
-    if (next && clockOk(next, app.now())) next = markQuestDay(next, app.contents, app.now());
-    app.state = touchClock(next, app.now());
-    if (storage) app.storageOk = save(storage, next) && app.storageOk;
+    if (next && clockOk(next, now)) next = markQuestDay(next, app.contents, now);
+    // 전투가 끝나거나 퀘스트를 다 끝내면, 마무리 버튼을 안 눌러도 부모 화면이 따라오게 저장본을 보낸다
+    let push = false;
+    if (next && prev) {
+      const doneNow = next.habit.questDays?.[d] && !prev.habit.questDays?.[d];
+      const battled = (next.habit.battles?.[d] || 0) > (prev.habit.battles?.[d] || 0);
+      if (doneNow) next = enqueue(next, 'event', { kind: 'quests_done', battles: next.habit.battles?.[d] || 0 }, now);
+      if (doneNow || battled) { next = enqueue(next, 'save', { save: saveString(next) }, now); push = true; }
+    }
+    app.state = touchClock(next, now);
+    if (storage) app.storageOk = save(storage, app.state) && app.storageOk;
     render();
+    if (push) app.sync();
   },
   go(route) {
     const next = ROUTES[route] ? route : 'home';
