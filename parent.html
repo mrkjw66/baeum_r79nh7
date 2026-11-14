@@ -468,6 +468,7 @@ function validate(s) {
   if (qs !== undefined && (!isObj(qs) || !DAY.test(qs.day) || !Array.isArray(qs.list) || qs.list.length > 5
     || !qs.list.every(q => isObj(q) && ['review', 'battle', 'focus', 'journal'].includes(q.kind) && str(q.label, 80) && (str(String(q.target), 60)) && (q.need === undefined || (Number.isInteger(q.need) && q.need > 0 && q.need <= 20))))) fail('quests');
   if (s.habit.battles !== undefined && !mapOf(s.habit.battles, n => Number.isInteger(n) && n >= 0)) fail('battles');
+  if (s.habit.questDays !== undefined && !mapOf(s.habit.questDays, v => v === true)) fail('questDays');
   if (!mapOf(s.xpLog, num) || !mapOf(s.weeks, isObj) || !Array.isArray(s.outbox) || !num(s.counter)) fail('misc');
   for (const w of Object.values(s.weeks)) {
     if (w.amount != null && !num(w.amount)) fail('weeks');
@@ -947,7 +948,7 @@ const { monsterState, sortUnits } = __m["src/engine/dungeon.js"];
 const PLAN_GOALS = [
   { id: 'clear2', label: '새 몬스터 2마리 처치' },
   { id: 'reviewAll', label: '도망친 몬스터 모두 잡기' },
-  { id: 'study5', label: '5일 공부하기' },
+  { id: 'study5', label: '오늘의 퀘스트 5일 완료' },
   { id: 'focus8', label: '집중 타이머 8번' },
   { id: 'journal5', label: '모험 일지 5번 쓰기' },
 ];
@@ -957,8 +958,9 @@ const FOCUS_PER_DAY = 3;
 const weekDays = (wk) => Array.from({ length: 7 }, (_, i) => addDays(wk, i));
 const countIn = (map, wk) => weekDays(wk).reduce((n, d) => n + (map[d] ? (map[d] === true ? 1 : map[d]) : 0), 0);
 
+// 공부한 날 = 오늘의 퀘스트를 다 끝낸 날 (용돈 꾸준함, '5일 공부' 목표에 쓰임)
 function studyDays(state, wk) {
-  return countIn(state.habit.days, wk);
+  return countIn(state.habit.questDays || {}, wk);
 }
 
 function setHabit(state, key, value) {
@@ -1056,9 +1058,8 @@ function todayQuests(state, contents, now) {
     const m = c.monsters.find(x => monsterState(c, state.progress, x.id, contents) === 'open');
     if (m) { quests.push({ kind: 'battle', label: `전투 ${BATTLES_PER_DAY}번 하기 (추천: ${c.region} ${m.name})`, target: m.id, need: BATTLES_PER_DAY }); break; }
   }
-  quests.push({ kind: 'focus', label: '집중 타이머 20분', target: 1 });
-  if (quests.length < 3) quests.push({ kind: 'journal', label: '모험 일지 한 줄 쓰기', target: 1 });
-  return quests.slice(0, 3);
+  quests.push({ kind: 'journal', label: '모험 일지 한 줄 쓰기', target: 1 });
+  return quests;
 }
 
 // 오늘의 퀘스트는 하루 첫 화면에서 정해 저장하고, 그날은 바뀌지 않는다
@@ -1083,7 +1084,7 @@ function countBattle(state, now) {
 function ensureDailyQuests(state, contents, now) {
   const day = dayKey(now);
   const saved = state.habit.quests;
-  const oldRule = saved?.list?.some(q => q.kind === 'battle' && !q.need);
+  const oldRule = saved?.list?.some(q => (q.kind === 'battle' && !q.need) || q.kind === 'focus');
   if (saved?.day === day && !oldRule) return state;
   const list = todayQuests(state, contents, now).map(({ kind, label, target, need }) => (need ? { kind, label, target, need } : { kind, label, target }));
   return setHabit(state, 'quests', { day, list });
@@ -1097,7 +1098,22 @@ function questProgress(state, contents, now) {
   return { quests, done, total: quests.length, allDone: quests.length > 0 && done === quests.length };
 }
 
-return { PLAN_GOALS, studyDays, markStudy, markBattle, useRestCamp, streak, focusComplete, writeJournal, planOpen, setPlan, goalDone, todayQuests, BATTLES_PER_DAY, countBattle, ensureDailyQuests, questProgress };
+function completeQuestDay(state, now) {
+  if (isNight(now)) return state;
+  const d = dayKey(now);
+  const days = state.habit.questDays || {};
+  if (days[d]) return state;
+  return setHabit(state, 'questDays', { ...days, [d]: true });
+}
+
+// 퀘스트를 다 끝냈으면 오늘을 공부한 날로 기록한다 (행동이 끝날 때마다 불러도 된다)
+function markQuestDay(state, contents, now) {
+  const d = dayKey(now);
+  if (state.habit.questDays?.[d] || state.habit.quests?.day !== d) return state;
+  return questProgress(state, contents, now).allDone ? completeQuestDay(state, now) : state;
+}
+
+return { PLAN_GOALS, studyDays, markStudy, markBattle, useRestCamp, streak, focusComplete, writeJournal, planOpen, setPlan, goalDone, todayQuests, BATTLES_PER_DAY, countBattle, ensureDailyQuests, questProgress, completeQuestDay, markQuestDay };
 })();
 __m["src/engine/allowance.js"] = (function () {
 const { weekKey, addDays, dayKey } = __m["src/engine/time.js"];
