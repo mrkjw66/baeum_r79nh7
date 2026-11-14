@@ -297,6 +297,13 @@ textarea { margin-top: 6px; }
 
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
+.finish-card { margin-top: 12px; display: grid; gap: 8px; }
+.finish-card h2 { margin: 0; }
+.finish-card .sub, .finish-card .promo-title { margin: 0; }
+.finish-card textarea { width: 100%; }
+.warn-card { box-shadow: inset 3px 0 0 var(--gold); }
+.finish-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
 </style>
 </head>
 <body>
@@ -1434,6 +1441,8 @@ const { heroImg, evoStrip, stageName, radarSVG } = __m["src/ui/avatar.js"];
 const { tierLabel } = __m["src/engine/stats.js"];
 const { questProgress, streak } = __m["src/engine/habit.js"];
 const { promoStatus } = __m["src/engine/promotion.js"];
+const { dayKey } = __m["src/engine/time.js"];
+
 
 
 
@@ -1441,6 +1450,31 @@ const { promoStatus } = __m["src/engine/promotion.js"];
 
 
 const ICON = { review: '🏃', battle: '⚔️', focus: '⏳', journal: '📖' };
+
+function finishCard(app, qp) {
+  const s = app.state;
+  const d = dayKey(app.now());
+  const sent = s.habit.dailySent?.[d];
+  const wroteToday = s.habit.journalDays[d];
+  const box = wroteToday ? '' : `<label for="home-journal">오늘 한 줄 일지 (어려웠던 것이나 새로 안 것)</label>
+      <textarea id="home-journal" rows="2" maxlength="200" placeholder="예: 분수 나눗셈은 뒤집어서 곱한다"></textarea>`;
+  if (sent && !app.view.finishConfirm) {
+    return `<div class="card finish-card" data-test="finish-done" role="status">
+      <p class="promo-title">✓ 오늘 학습을 마쳤어. 수고했어!</p>
+      <p class="sub">${qp.allDone ? '오늘은 공부한 날로 기록됐어.' : '퀘스트를 다 하면 공부한 날로 기록돼. 더 하고 다시 보내도 돼.'}</p>
+      ${box}<button id="home-resend" class="btn ghost">오늘 기록 다시 보내기</button></div>`;
+  }
+  if (app.view.finishConfirm) {
+    return `<div class="card finish-card warn-card" data-test="finish-confirm" role="alert">
+      <p class="promo-title">아직 남은 퀘스트: ${esc(app.view.finishConfirm)}</p>
+      <p class="sub">지금 마치면 오늘은 공부한 날로 기록되지 않아. 그래도 마칠래?</p>
+      ${box}<div class="finish-actions"><button id="keep-playing" class="btn primary">계속 모험하기</button><button id="finish-anyway" class="btn ghost">그래도 마치기</button></div></div>`;
+  }
+  return `<div class="card finish-card" data-test="finish">
+    <h2>오늘 학습 마무리</h2>
+    <p class="sub">${qp.allDone ? '퀘스트를 다 했어! 마무리하면 부모님께 오늘 기록이 가.' : '다 끝나면 눌러 줘. 오늘 기록이 부모님께 가.'}</p>
+    ${box}<button id="home-finish" class="btn primary">오늘 학습 마무리</button></div>`;
+}
 
 function home(app) {
   const s = app.state;
@@ -1474,10 +1508,16 @@ function home(app) {
       <h2>오늘의 퀘스트 <span class="quest-count" data-test="quest-count">${qp.done}/${qp.total}</span></h2>
       ${qp.allDone ? `<div class="quest-done" data-test="quests-done" role="status"><p class="promo-title">오늘의 퀘스트 완료!</p><p class="sub">내일 새 퀘스트가 열려. 더 하고 싶으면 지도에서 계속 모험해도 돼.</p></div>` : ''}
       <ul class="quests">${qp.quests.map(q => `<li data-test="quest"${q.done ? ' data-done="true"' : ''}><button class="quest${q.done ? ' done' : ''}" data-kind="${q.kind}" data-target="${esc(q.target)}" ${q.done ? 'disabled' : ''}><span aria-hidden="true">${q.done ? '✓' : ICON[q.kind]}</span>${esc(q.label)}${q.need ? ` <span class="quest-have" data-test="battle-count">${q.have}/${q.need}</span>` : ''}${q.done ? '<span class="visually-hidden"> (완료)</span>' : ''}</button></li>`).join('')}</ul>
+      ${finishCard(app, qp)}
       ${lastJournal ? `<h2>모험 일지</h2><p class="journal-last">${esc(lastJournal.text)}</p>` : ''}
     </section>`,
     bind(root) {
       on(root, '[data-test=promo-card] button', 'click', () => app.openPromo());
+      const journal = () => root.querySelector('#home-journal')?.value || '';
+      on(root, '#home-finish', 'click', () => app.finishFromHome(journal()));
+      on(root, '#finish-anyway', 'click', () => app.finishFromHome(journal(), true));
+      on(root, '#keep-playing', 'click', () => app.keepPlaying());
+      on(root, '#home-resend', 'click', () => app.finishFromHome(journal(), true));
       on(root, '.quest', 'click', (e, el) => {
         const k = el.dataset.kind;
         if (k === 'battle') {
@@ -2077,7 +2117,7 @@ const { startBattle, answer, hint, finish, current, startBossAttempt, bossRetryA
 const { promoStatus, promoMonster, applyPromo, PROMO_LIMIT_MIN } = __m["src/engine/promotion.js"];
 const { applyResult, monsterState, subjectCount } = __m["src/engine/dungeon.js"];
 const { addWrong, reviewAnswer, dueReviews } = __m["src/engine/review.js"];
-const { markBattle, markStudy, focusComplete, writeJournal, useRestCamp, setPlan, streak, planOpen, ensureDailyQuests, countBattle, markQuestDay } = __m["src/engine/habit.js"];
+const { markBattle, markStudy, focusComplete, writeJournal, useRestCamp, setPlan, streak, planOpen, ensureDailyQuests, countBattle, markQuestDay, questProgress } = __m["src/engine/habit.js"];
 const { settleAll } = __m["src/engine/allowance.js"];
 const { isCorrect } = __m["src/engine/answer.js"];
 const { enqueue, canSend, flush, fetchLastSave, verifyParent } = __m["src/engine/reporter.js"];
@@ -2168,7 +2208,7 @@ const app = {
   },
   go(route) {
     const next = ROUTES[route] ? route : 'home';
-    if (next !== app.view.route) { app.view.review = null; app.view.todayMsg = null; app.view.settingsMsg = null; app.view.openedWeek = null; }
+    if (next !== app.view.route) { app.view.review = null; app.view.todayMsg = null; app.view.finishConfirm = null; app.view.settingsMsg = null; app.view.openedWeek = null; }
     app.view.route = next;
     if (location.hash !== '#' + app.view.route) history.replaceState(null, '', '#' + app.view.route);
     render();
@@ -2403,6 +2443,23 @@ const app = {
     app.view.todayMsg = canSend(location, CONFIG) ? '오늘 기록을 보냈어. 수고했어!' : '오늘 기록을 저장했어. 수고했어!';
     app.set(s);
     app.sync();
+  },
+  // 홈의 '오늘 학습 마무리': 퀘스트가 남았으면 한 번 물어보고 마친다
+  finishFromHome(text, force = false) {
+    const now = app.now();
+    const typed = String(text || '').trim();
+    const left = questProgress(app.state, app.contents, now).quests
+      .filter(q => !q.done && !(q.kind === 'journal' && typed));
+    if (left.length && !force) {
+      app.view.finishConfirm = left.map(q => (q.need ? `전투 ${q.have}/${q.need}` : q.kind === 'review' ? '복습' : '모험 일지')).join(', ');
+      return render();
+    }
+    app.view.finishConfirm = null;
+    app.finishDay(typed);
+  },
+  keepPlaying() {
+    app.view.finishConfirm = null;
+    render();
   },
   rest() {
     const r = useRestCamp(app.state, app.now());
